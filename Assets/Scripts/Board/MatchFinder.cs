@@ -6,10 +6,17 @@ using UnityEngine;
 /// </summary>
 public static class MatchFinder
 {
-    public static HashSet<Vector2Int> FindMatches(int[,] t)
+    /// <summary>가로 또는 세로로 이어진 같은 원소 3개 이상 한 줄.</summary>
+    public struct Run
+    {
+        public List<Vector2Int> cells;
+        public bool horizontal;
+    }
+
+    public static List<Run> FindRuns(int[,] t)
     {
         int w = t.GetLength(0), h = t.GetLength(1);
-        var result = new HashSet<Vector2Int>();
+        var runs = new List<Run>();
 
         for (int y = 0; y < h; y++)
         {
@@ -17,11 +24,15 @@ public static class MatchFinder
             while (x < w)
             {
                 int type = t[x, y];
-                int run = 1;
-                while (type >= 0 && x + run < w && t[x + run, y] == type) run++;
-                if (type >= 0 && run >= 3)
-                    for (int i = 0; i < run; i++) result.Add(new Vector2Int(x + i, y));
-                x += run;
+                int len = 1;
+                while (type >= 0 && x + len < w && t[x + len, y] == type) len++;
+                if (type >= 0 && len >= 3)
+                {
+                    var cells = new List<Vector2Int>();
+                    for (int i = 0; i < len; i++) cells.Add(new Vector2Int(x + i, y));
+                    runs.Add(new Run { cells = cells, horizontal = true });
+                }
+                x += len;
             }
         }
 
@@ -31,26 +42,39 @@ public static class MatchFinder
             while (y < h)
             {
                 int type = t[x, y];
-                int run = 1;
-                while (type >= 0 && y + run < h && t[x, y + run] == type) run++;
-                if (type >= 0 && run >= 3)
-                    for (int i = 0; i < run; i++) result.Add(new Vector2Int(x, y + i));
-                y += run;
+                int len = 1;
+                while (type >= 0 && y + len < h && t[x, y + len] == type) len++;
+                if (type >= 0 && len >= 3)
+                {
+                    var cells = new List<Vector2Int>();
+                    for (int i = 0; i < len; i++) cells.Add(new Vector2Int(x, y + i));
+                    runs.Add(new Run { cells = cells, horizontal = false });
+                }
+                y += len;
             }
         }
 
+        return runs;
+    }
+
+    public static HashSet<Vector2Int> FindMatches(int[,] t)
+    {
+        var result = new HashSet<Vector2Int>();
+        foreach (var run in FindRuns(t))
+            foreach (var c in run.cells) result.Add(c);
         return result;
     }
 
-    /// <summary>스왑 한 번으로 매치를 만들 수 있는 수가 있는지.</summary>
-    public static bool HasPossibleMove(int[,] t)
+    /// <summary>스왑 한 번으로 매치를 만들 수 있는 수가 있는지. locked가 true인 칸은 움직일 수 없다.</summary>
+    public static bool HasPossibleMove(int[,] t, bool[,] locked = null)
     {
         int w = t.GetLength(0), h = t.GetLength(1);
         for (int x = 0; x < w; x++)
         for (int y = 0; y < h; y++)
         {
-            if (x + 1 < w && SwapMakesMatch(t, x, y, x + 1, y)) return true;
-            if (y + 1 < h && SwapMakesMatch(t, x, y, x, y + 1)) return true;
+            if (locked != null && locked[x, y]) continue;
+            if (x + 1 < w && (locked == null || !locked[x + 1, y]) && SwapMakesMatch(t, x, y, x + 1, y)) return true;
+            if (y + 1 < h && (locked == null || !locked[x, y + 1]) && SwapMakesMatch(t, x, y, x, y + 1)) return true;
         }
         return false;
     }

@@ -41,6 +41,13 @@ public class Sfx : MonoBehaviour
         clips[(int)SfxType.Whoosh] = Make("Whoosh", 0.3f, Whoosh);
         clips[(int)SfxType.Impact] = Make("Impact", 0.55f, Impact);
         clips[(int)SfxType.Chime] = Make("Chime", 0.6f, Chime);
+
+        // VARCO Sounds로 만든 파일이 있으면 합성음 대신 쓴다 (Assets/Resources/Audio/sfx_pop.wav 등)
+        for (int i = 0; i < clips.Length; i++)
+        {
+            var real = Resources.Load<AudioClip>("Audio/sfx_" + ((SfxType)i).ToString().ToLowerInvariant());
+            if (real != null) clips[i] = real;
+        }
     }
 
     static AudioClip Make(string name, float length, System.Action<float[]> fill)

@@ -19,9 +19,10 @@ public class ComboText : MonoBehaviour
     void Awake()
     {
         var canvas = UiUtil.CreateCanvas("ComboCanvas", transform, 10);
-        comboLabel = UiUtil.CreateText(canvas.transform, "Combo", new Vector2(0.5f, 0.5f), new Vector2(0f, 140f), 100, FontStyle.BoldAndItalic);
+        // 가로 화면: 보드(왼쪽 절반) 위쪽에 띄운다
+        comboLabel = UiUtil.CreateText(canvas.transform, "Combo", new Vector2(0.25f, 0.5f), new Vector2(0f, 160f), 100, FontStyle.BoldAndItalic);
         comboLabel.GetComponent<Outline>().effectDistance = new Vector2(5f, -5f);
-        damageLabel = UiUtil.CreateText(canvas.transform, "Damage", new Vector2(0.5f, 0.5f), new Vector2(0f, 20f), 80, FontStyle.Bold);
+        damageLabel = UiUtil.CreateText(canvas.transform, "Damage", new Vector2(0.25f, 0.5f), new Vector2(0f, 40f), 80, FontStyle.Bold);
         comboLabel.enabled = damageLabel.enabled = false;
     }
 

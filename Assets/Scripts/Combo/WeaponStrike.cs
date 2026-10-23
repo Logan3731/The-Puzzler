@@ -33,7 +33,7 @@ public class WeaponStrike : MonoBehaviour
         foreach (var cell in cells)
         {
             yield return Fly(weapon, board.CellToWorld(cell) + Vector3.back * 1.5f, -side);
-            board.DestroyBlock(cell, 2.2f + firedCombo * 0.1f);
+            board.BreakBlocks(new System.Collections.Generic.List<Vector2Int> { cell }, 2.2f + firedCombo * 0.1f); // 동료가 부순 블록도 데미지, 특수 블록이면 발동
             Sfx.Play(SfxType.Impact, 1.5f, 0.7f);
             combo.cameraShake?.Shake(0.35f, 0.2f);
             combo.hitStop?.Stop(hitStopTime);
@@ -58,7 +58,7 @@ public class WeaponStrike : MonoBehaviour
             combo.cameraShake?.Shake(0.45f, 0.25f);
             combo.cameraShake?.Punch(0.06f);
             combo.hitStop?.Stop(hitStopTime * 1.5f);
-            combo.CompanionHit(combo.warriorDamage, "WARRIOR", color, firedCombo);
+            combo.CompanionHit(combo.WarriorDamage, "WARRIOR", color, firedCombo);
         }
         Destroy(weapon.gameObject);
         combo.PendingHits--;
@@ -80,6 +80,13 @@ public class WeaponStrike : MonoBehaviour
         if (weaponPrefab != null)
         {
             root = Instantiate(weaponPrefab, position, Quaternion.identity).transform;
+        }
+        else if (ArtLibrary.Get("sword") != null)
+        {
+            // VARCO 검 그림 (칼날이 위쪽)
+            root = new GameObject("Weapon_Sword").transform;
+            root.position = position;
+            ArtLibrary.Quad(ArtLibrary.Get("sword"), root, 2f, fitHeight: true);
         }
         else
         {

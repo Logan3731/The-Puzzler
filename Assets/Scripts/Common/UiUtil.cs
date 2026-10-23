@@ -1,7 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 
-/// <summary>코드로 만드는 간단한 UGUI 헬퍼 (세로 1080x1920 기준).</summary>
+/// <summary>코드로 만드는 간단한 UGUI 헬퍼 (가로 1920x1080 기준).</summary>
 public static class UiUtil
 {
     static Font font;
@@ -17,14 +17,15 @@ public static class UiUtil
 
     public static Canvas CreateCanvas(string name, Transform parent, int sortingOrder)
     {
-        var go = new GameObject(name, typeof(Canvas), typeof(CanvasScaler));
+        // GraphicRaycaster가 있어야 버튼(보상 카드, 스킬 버튼)이 눌린다
+        var go = new GameObject(name, typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
         go.transform.SetParent(parent, false);
         var canvas = go.GetComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
         canvas.sortingOrder = sortingOrder;
         var scaler = go.GetComponent<CanvasScaler>();
         scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1080f, 1920f);
+        scaler.referenceResolution = new Vector2(1920f, 1080f);
         scaler.matchWidthOrHeight = 0.5f;
         return canvas;
     }

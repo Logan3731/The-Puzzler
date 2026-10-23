@@ -35,6 +35,17 @@ public static class MaterialUtil
         return mat;
     }
 
+    static readonly Dictionary<Color, Material> unlitCache = new Dictionary<Color, Material>();
+
+    /// <summary>조명을 받지 않는 반투명 머티리얼 (블록 위 상태 표시 등). 알파 값이 투명도다.</summary>
+    public static Material Unlit(Color color)
+    {
+        if (unlitCache.TryGetValue(color, out var mat) && mat != null) return mat;
+        mat = new Material(Shader.Find("Sprites/Default")) { color = color };
+        unlitCache[color] = mat;
+        return mat;
+    }
+
     /// <summary>정점 색상을 쓰는 언릿 머티리얼 (트레일 등).</summary>
     public static Material SpriteDefault
     {

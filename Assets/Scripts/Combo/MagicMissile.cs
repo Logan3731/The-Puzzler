@@ -30,7 +30,7 @@ public class MagicMissile : MonoBehaviour
         Vector3 target = board.CellToWorld(cell) + Vector3.back * 1.5f;
         yield return Fly(missile, origin, target, toBlockTime, bend);
 
-        board.DestroyBlock(cell, 2f);
+        board.BreakBlocks(new System.Collections.Generic.List<Vector2Int> { cell }, 2f); // 동료가 부순 블록도 데미지, 특수 블록이면 발동
         Debris.Burst(target, color, 14, 8f);
         FxRing.Spawn(target, color, 1.8f, 0.25f);
         Sfx.Play(SfxType.Hit, 1.4f, 0.8f);
@@ -52,7 +52,7 @@ public class MagicMissile : MonoBehaviour
             FxRing.Spawn(to, color, 2.6f, 0.3f);
             Sfx.Play(SfxType.Impact, 1.3f, 0.8f);
             combo.cameraShake?.Shake(0.25f, 0.15f);
-            combo.CompanionHit(combo.mageDamage, "MAGE", color, firedCombo);
+            combo.CompanionHit(combo.MageDamage, "MAGE", color, firedCombo);
         }
         Destroy(missile.gameObject);
         combo.PendingHits--;
@@ -80,8 +80,16 @@ public class MagicMissile : MonoBehaviour
         {
             root = new GameObject("MagicMissile").transform;
             root.position = position;
-            MaterialUtil.Primitive(PrimitiveType.Sphere, root, Vector3.zero, Vector3.one * 0.45f, color, 2.5f);
-            MaterialUtil.Primitive(PrimitiveType.Sphere, root, Vector3.back * 0.1f, Vector3.one * 0.25f, Color.white, 2f);
+            var art = ArtLibrary.Get("missile");
+            if (art != null)
+            {
+                ArtLibrary.Quad(art, root, 0.9f);
+            }
+            else
+            {
+                MaterialUtil.Primitive(PrimitiveType.Sphere, root, Vector3.zero, Vector3.one * 0.45f, color, 2.5f);
+                MaterialUtil.Primitive(PrimitiveType.Sphere, root, Vector3.back * 0.1f, Vector3.one * 0.25f, Color.white, 2f);
+            }
         }
         Fx.AddTrail(root, Vector3.zero, 0.4f, 0.2f, Color.white, color);
         return root;

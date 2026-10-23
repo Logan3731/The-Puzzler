@@ -40,16 +40,32 @@ public class BoardManager : MonoBehaviour
     [Tooltip("스와이프로 인정할 최소 드래그 거리 (칸 단위)")]
     public float dragThreshold = 0.35f;
 
-    [Header("Layout")]
-    [Tooltip("보드 위쪽에 적이 들어갈 공간 (칸 단위)")]
-    public float enemySpace = 4.5f;
-    [Tooltip("화면 맨 위 턴/스테이지 표시용 여백 (칸 단위)")]
-    public float hudSpace = 1.5f;
+    [Header("Layout (가로 16:9: 왼쪽 보드, 오른쪽 길과 몬스터)")]
+    [Tooltip("화면 세로 높이 (월드 단위). 픽셀 그림판 360줄에 들어가는 높이")]
+    public float viewHeight = 10f;
+    [Tooltip("보드와 화면 왼쪽 끝 사이 여백 (칸 단위)")]
+    public float boardMargin = 0.5f;
+    [Tooltip("몬스터가 서는 높이 (오른쪽 패널 안)")]
+    public float enemyY = -0.4f;
     public Color backgroundColor = new Color(0.08f, 0.06f, 0.14f);
+
+    /// <summary>오른쪽 패널(길과 몬스터)의 가운데 x.</summary>
+    public float RightPanelX { get; private set; }
+    public RoadScene road;
 
     public ComboSystem combo;
     public Enemy enemy;
-    public TurnManager turns;
+    public RunManager run;
+    public Player player;
+    public EnemyIntent intent;
+    public PlayerSkills skills;
+    public PlayerLevel level;
+
+    /// <summary>원소 변환·망치처럼 블록을 골라야 하는 액티브 스킬을 쓰는 중이면 그 스킬.</summary>
+    public SkillId? Targeting { get; private set; }
+    /// <summary>이번 스테이지에서 쓴 턴 수 (원 턴 킬 보너스 판정).</summary>
+    public int TurnInStage { get; private set; }
+    public event Action<Vector2Int> ConvertTargetChosen;
 
     public float HalfWidth => width * cellSize * 0.5f;
     public bool IsBusy => busy;
@@ -57,7 +73,6 @@ public class BoardManager : MonoBehaviour
     Block[,] grid;
     bool busy;
     Camera cam;
-    float lastAspect;
 
     bool pressing, swiped;
     Vector2 pressScreen;
@@ -74,8 +89,26 @@ public class BoardManager : MonoBehaviour
         if (combo == null) combo = FindFirstObjectByType<ComboSystem>();
         if (combo == null) combo = gameObject.AddComponent<ComboSystem>();
         if (enemy == null) enemy = FindFirstObjectByType<Enemy>();
-        if (turns == null) turns = FindFirstObjectByType<TurnManager>();
-        if (turns == null) turns = gameObject.AddComponent<TurnManager>();
+        if (player == null) player = FindFirstObjectByType<Player>();
+        if (player == null) player = gameObject.AddComponent<Player>();
+        if (run == null) run = FindFirstObjectByType<RunManager>();
+        if (run == null) run = gameObject.AddComponent<RunManager>();
+        if (skills == null) skills = FindFirstObjectByType<PlayerSkills>();
+        if (skills == null) skills = gameObject.AddComponent<PlayerSkills>();
+        if (level == null) level = FindFirstObjectByType<PlayerLevel>();
+        if (level == null) level = gameObject.AddComponent<PlayerLevel>();
+        if (intent == null && enemy != null) intent = enemy.GetComponent<EnemyIntent>();
+        if (intent == null && enemy != null) intent = enemy.gameObject.AddComponent<EnemyIntent>();
+    }
+
+    void OnEnable()
+    {
+        if (enemy != null) enemy.Respawned += ClearStatuses;
+    }
+
+    void OnDisable()
+    {
+        if (enemy != null) enemy.Respawned -= ClearStatuses;
     }
 
     void Start()
@@ -83,6 +116,7 @@ public class BoardManager : MonoBehaviour
         cam = Camera.main;
         FitCamera();
         PlaceEnemy();
+        BuildRoad();
         BuildBackground();
         grid = new Block[width, height];
         StartCoroutine(FillBoard());
@@ -90,7 +124,6 @@ public class BoardManager : MonoBehaviour
 
     void Update()
     {
-        if (cam != null && !Mathf.Approximately(cam.aspect, lastAspect)) FitCamera();
         HandleInput();
     }
 
@@ -98,31 +131,42 @@ public class BoardManager : MonoBehaviour
 
     public Vector3 CellToWorld(Vector2Int c) => CellToWorld(c.x, c.y);
 
-    public Vector3 CellToWorld(int x, int y) =>
+    public Vector3 CellToWorld(int x, int y) => CellToWorld((float)x, (float)y);
+
+    public Vector3 CellToWorld(float x, float y) =>
         transform.position + new Vector3((x - (width - 1) * 0.5f) * cellSize, (y - (height - 1) * 0.5f) * cellSize, 0f);
 
     bool InBounds(Vector2Int c) => c.x >= 0 && c.x < width && c.y >= 0 && c.y < height;
 
+    /// <summary>가로 16:9 화면: 보드는 왼쪽 절반, 오른쪽 절반은 길과 몬스터.</summary>
     void FitCamera()
     {
         if (cam == null) return;
-        lastAspect = cam.aspect;
-        float boardH = height * cellSize;
-        float topSpace = (enemySpace + hudSpace) * cellSize;
-        float totalH = boardH + topSpace + cellSize;
-        float totalW = width * cellSize + cellSize;
+        float halfH = viewHeight * 0.5f;
+        float halfW = halfH * 16f / 9f;
         cam.orthographic = true;
-        cam.orthographicSize = Mathf.Max(totalH * 0.5f, totalW / cam.aspect * 0.5f);
+        cam.orthographicSize = halfH;
         cam.clearFlags = CameraClearFlags.SolidColor;
         cam.backgroundColor = backgroundColor;
-        cam.transform.SetPositionAndRotation(
-            transform.position + new Vector3(0f, topSpace * 0.5f, -20f), Quaternion.identity);
+
+        // 카메라 왼쪽 끝 + 여백 = 보드 왼쪽 끝
+        float camX = transform.position.x - width * cellSize * 0.5f - boardMargin * cellSize + halfW;
+        cam.transform.SetPositionAndRotation(new Vector3(camX, transform.position.y, -20f), Quaternion.identity);
+        RightPanelX = camX + halfW * 0.5f;
     }
 
     void PlaceEnemy()
     {
         if (enemy == null) return;
-        enemy.transform.position = transform.position + Vector3.up * (height * cellSize * 0.5f + enemySpace * cellSize * 0.4f);
+        enemy.transform.position = new Vector3(RightPanelX, transform.position.y + enemyY, 0f);
+    }
+
+    void BuildRoad()
+    {
+        if (road == null) road = FindFirstObjectByType<RoadScene>();
+        if (road == null) road = new GameObject("RoadScene").AddComponent<RoadScene>();
+        float halfH = viewHeight * 0.5f;
+        road.Build(RightPanelX, halfH * 16f / 9f, transform.position.y + halfH);
     }
 
     void BuildBackground()
@@ -148,9 +192,18 @@ public class BoardManager : MonoBehaviour
     {
         GameObject go;
         var prefab = blockPrefabs != null && type < blockPrefabs.Length ? blockPrefabs[type] : null;
+        var art = type < ArtLibrary.ElementArt.Length ? ArtLibrary.Get(ArtLibrary.ElementArt[type]) : null;
+        bool textured = false;
         if (prefab != null)
         {
             go = Instantiate(prefab, position, prefab.transform.rotation, transform);
+        }
+        else if (art != null)
+        {
+            // VARCO 원소 조각 그림
+            go = ArtLibrary.Quad(art, transform, cellSize * 0.92f);
+            go.transform.position = position;
+            textured = true;
         }
         else
         {
@@ -164,6 +217,7 @@ public class BoardManager : MonoBehaviour
         go.name = $"Block_{type}";
         var block = go.GetComponent<Block>();
         if (block == null) block = go.AddComponent<Block>();
+        block.Textured = textured;
         block.Init(type, blockColors[type], cell);
         grid[cell.x, cell.y] = block;
         return block;
@@ -234,11 +288,17 @@ public class BoardManager : MonoBehaviour
 
     void HandleInput()
     {
-        if (busy || cam == null || !turns.CanPlay) return;
+        if (busy || cam == null || !run.CanPlay) return;
         var pointer = Pointer.current;
         if (pointer == null) return;
 
         Vector2 screen = pointer.position.ReadValue();
+
+        if (Targeting != null)
+        {
+            HandleTargeting(pointer, screen);
+            return;
+        }
 
         if (pointer.press.wasPressedThisFrame)
         {
@@ -265,6 +325,24 @@ public class BoardManager : MonoBehaviour
         {
             pressing = false;
             if (!swiped) HandleTap(pressCell);
+        }
+    }
+
+    /// <summary>스킬 대상 고르기: 드래그 없이 블록 하나를 누르면 그 블록에 스킬을 쓴다.</summary>
+    void HandleTargeting(Pointer pointer, Vector2 screen)
+    {
+        if (!pointer.press.wasReleasedThisFrame || !TryGetCell(screen, out var cell)) return;
+        var skill = Targeting.Value;
+        if (skill == SkillId.ActiveHammer)
+        {
+            Targeting = null;
+            StartCoroutine(UseHammer(cell));
+        }
+        else if (skill == SkillId.ActiveConvert)
+        {
+            Targeting = null;
+            Select(cell);
+            ConvertTargetChosen?.Invoke(cell); // 스킬 바가 원소 고르기를 띄운다
         }
     }
 
@@ -319,21 +397,66 @@ public class BoardManager : MonoBehaviour
 
     IEnumerator TrySwap(Vector2Int a, Vector2Int b)
     {
-        if (grid[a.x, a.y] == null || grid[b.x, b.y] == null) yield break;
+        var ba = grid[a.x, a.y];
+        var bb = grid[b.x, b.y];
+        if (ba == null || bb == null) yield break;
         busy = true;
+
+        // 점액으로 굳은 블록은 움직일 수 없다
+        if (ba.Locked || bb.Locked)
+        {
+            var stuck = ba.Locked ? ba : bb;
+            Sfx.Play(SfxType.Hit, 0.6f, 0.5f);
+            yield return stuck.Punch(0.12f, 0.15f);
+            busy = false;
+            yield break;
+        }
+
         yield return SwapBlocks(a, b);
 
-        var matches = MatchFinder.FindMatches(GetTypes());
-        if (matches.Count == 0)
+        // 특수 블록끼리 바꾸면 매치가 없어도 터진다 (조합에 따라 더 크게)
+        HashSet<Vector2Int> forced = null;
+        if (ba.Special != SpecialType.None && bb.Special != SpecialType.None)
+        {
+            forced = SpecialComboArea(ba, bb, a, b);
+            Sfx.Play(SfxType.Chime, 1.6f, 0.8f);
+            combo.cameraShake?.Punch(0.05f);
+        }
+
+        var runs = MatchFinder.FindRuns(GetTypes());
+        if (runs.Count == 0 && forced == null)
         {
             yield return SwapBlocks(a, b); // 매치가 없으면 되돌린다
             busy = false;
             yield break;
         }
 
-        turns.ConsumeTurn();
-        yield return ResolveBoard(matches);
-        turns.EndTurn();
+        TurnInStage++;
+        yield return ResolveBoard(runs, a, b, forced);
+        skills.TickCooldowns(); // 액티브 스킬 쿨타임은 플레이어 턴마다 줄어든다
+
+        // 적 차례: 불씨 확인, 행동 예고 카운트, 행동 (공격하면 플레이어 HP가 준다)
+        if (intent != null && !player.IsDead) yield return intent.TakeTurn(this, player);
+
+        // 이번 턴에 레벨업했으면 능력을 고른다 (적을 쓰러뜨린 턴이면 RunManager가 스테이지 전환 전에 처리한다)
+        if (!player.IsDead && enemy.IsAlive) yield return run.ProcessLevelUps();
+
+        if (!player.IsDead && !MatchFinder.HasPossibleMove(GetTypes(), GetLocks())) yield return Reshuffle();
+        busy = false;
+    }
+
+    /// <summary>게임 오버 후 새 판: 상태를 지우고 보드를 새로 깐다.</summary>
+    public void ResetRun()
+    {
+        if (busy) return;
+        ClearStatuses();
+        StartCoroutine(ResetBoard());
+    }
+
+    IEnumerator ResetBoard()
+    {
+        busy = true;
+        yield return Reshuffle();
         busy = false;
     }
 
@@ -353,35 +476,468 @@ public class BoardManager : MonoBehaviour
         });
     }
 
-    IEnumerator ResolveBoard(HashSet<Vector2Int> matches)
+    /// <param name="forced">첫 단계에 매치와 상관없이 터뜨릴 칸 (특수 블록끼리 바꾼 경우)</param>
+    IEnumerator ResolveBoard(List<MatchFinder.Run> runs, Vector2Int swapA, Vector2Int swapB, HashSet<Vector2Int> forced = null)
     {
         combo.BeginChain();
-        var hits = new List<(Vector3 position, Color color)>();
-        while (matches.Count > 0)
+        var hits = new List<(Vector3 position, Color color, int element)>();
+        bool firstStep = true;
+        while (runs.Count > 0 || (firstStep && forced != null))
         {
             int c = combo.RegisterMatch();
             float strength = 1f + 0.1f * c;
+
+            var matched = new HashSet<Vector2Int>();
+            foreach (var run in runs)
+                foreach (var cell in run.cells) matched.Add(cell);
+            if (firstStep && forced != null) matched.UnionWith(forced);
+
+            // 특수 블록 생성 (보상으로 해금한 것만). 그 칸의 블록은 터지지 않고 특수 블록이 된다.
+            var creates = FindSpecialCreations(runs, firstStep, swapA, swapB);
+            if (firstStep && forced != null) creates.RemoveAll(cr => forced.Contains(cr.cell));
+            foreach (var (cell, _) in creates) matched.Remove(cell);
+
+            // 터지는 특수 블록이 다른 블록을 끌어들인다 (특수 블록끼리 연쇄)
+            var destroyed = ExpandSpecials(matched);
+
             hits.Clear();
-            foreach (var cell in matches)
+            foreach (var cell in destroyed)
             {
                 var b = grid[cell.x, cell.y];
-                if (b != null) hits.Add((b.transform.position, b.Color));
+                if (b == null) continue;
+                if ((b.Locked || b.Burning) && skills.PurifyHeal > 0) player.Heal(skills.PurifyHeal); // 정화
+                hits.Add((b.transform.position, b.Color, b.Type));
                 DestroyBlock(cell, strength);
             }
-            // 터진 블록마다 빛구슬이 날아가 적을 때린다
-            combo.LaunchOrbs(hits, DamageCalculator.Calculate(matches.Count, c));
-            yield return new WaitForSeconds(afterPopDelay);
+            skills.AddMana(hits.Count);
+            level.AddBlocks(hits.Count); // 블록 1개 = 경험치 1
+
+            foreach (var (cell, type) in creates)
+            {
+                var b = grid[cell.x, cell.y];
+                if (b == null || destroyed.Contains(cell)) continue;
+                b.SetLocked(false);
+                b.SetBurning(false);
+                b.SetSpecial(type);
+                b.StartCoroutine(b.Punch(0.2f, 0.5f));
+                FxRing.Spawn(b.transform.position + Vector3.back * 0.7f, Color.white, 1.4f, 0.3f);
+                Sfx.Play(SfxType.Chime, type == SpecialType.Bomb ? 1.5f : 1.25f, 0.5f);
+            }
+
+            // 터진 블록마다 빛구슬이 날아가 적을 때린다 (원소 상성·스킬 반영)
+            combo.LaunchOrbs(hits, firstStep);
+            yield return new WaitForSeconds(destroyed.Count > matched.Count ? afterPopDelay + 0.12f : afterPopDelay);
 
             // 3콤보+ 마법사, 5콤보+ 전사 (각각 턴당 한 번, 고정 데미지)
             yield return combo.PlayBonuses(this);
 
             yield return Collapse();
-            matches = MatchFinder.FindMatches(GetTypes());
+            runs = MatchFinder.FindRuns(GetTypes());
+            firstStep = false;
         }
         combo.EndChain();
-        while (combo.PendingHits > 0) yield return null; // 적에게 날아가는 동료 공격이 다 맞을 때까지
+        while (combo.PendingHits > 0) yield return null; // 적에게 날아가는 공격이 다 맞을 때까지
+    }
 
-        if (!MatchFinder.HasPossibleMove(GetTypes())) yield return Reshuffle();
+    /// <summary>
+    /// 가로·세로 줄이 한 칸에서 겹치면(L·T자) 십자 폭발, 4개 일자는 줄 파괴, 5개 이상 일자는 원소 폭발.
+    /// 해당 스킬이 없으면 만들지 않는다 (원소 폭발이 없고 줄 파괴만 있으면 5개 일자도 줄 파괴).
+    /// </summary>
+    List<(Vector2Int cell, SpecialType type)> FindSpecialCreations(List<MatchFinder.Run> runs, bool firstStep, Vector2Int swapA, Vector2Int swapB)
+    {
+        var creates = new List<(Vector2Int, SpecialType)>();
+        var used = new HashSet<int>();
+
+        if (skills.Has(SkillId.CrossBlock))
+        {
+            for (int i = 0; i < runs.Count; i++)
+            for (int j = 0; j < runs.Count; j++)
+            {
+                if (used.Contains(i) || used.Contains(j) || !runs[i].horizontal || runs[j].horizontal) continue;
+                foreach (var cell in runs[i].cells)
+                {
+                    if (!runs[j].cells.Contains(cell)) continue;
+                    if (grid[cell.x, cell.y].Special == SpecialType.None) creates.Add((cell, SpecialType.Cross));
+                    used.Add(i);
+                    used.Add(j);
+                    break;
+                }
+            }
+        }
+
+        for (int i = 0; i < runs.Count; i++)
+        {
+            var run = runs[i];
+            if (used.Contains(i) || run.cells.Count < 4) continue;
+            SpecialType type;
+            if (run.cells.Count >= 5 && skills.Has(SkillId.BombBlock)) type = SpecialType.Bomb;
+            else if (skills.Has(SkillId.LineBlock)) type = run.horizontal ? SpecialType.LineH : SpecialType.LineV;
+            else continue;
+
+            var pivot = PickPivot(run.cells, firstStep, swapA, swapB);
+            if (grid[pivot.x, pivot.y].Special != SpecialType.None) continue;
+            creates.Add((pivot, type));
+        }
+        return creates;
+    }
+
+    static bool IsLine(Block b) => b.Special == SpecialType.LineH || b.Special == SpecialType.LineV;
+
+    /// <summary>
+    /// 특수 블록끼리 바꿨을 때 터질 칸. 옮긴 칸(center)이 중심이다.
+    /// 일자+일자 = 십자(가로·세로 한 줄씩), 일자+폭탄(십자 폭발 블록) = 일자 방향 3줄, 폭탄+폭탄 = 5×5.
+    /// 그 밖의 조합(원소 폭발 등)은 두 블록이 각자 터진다.
+    /// </summary>
+    HashSet<Vector2Int> SpecialComboArea(Block x, Block y, Vector2Int other, Vector2Int center)
+    {
+        var area = new HashSet<Vector2Int>();
+        bool xLine = IsLine(x), yLine = IsLine(y);
+        bool xBomb = x.Special == SpecialType.Cross, yBomb = y.Special == SpecialType.Cross;
+        var pos = CellToWorld(center);
+        var shake = combo.cameraShake;
+
+        if (xLine && yLine)
+        {
+            for (int i = 0; i < width; i++) area.Add(new Vector2Int(i, center.y));
+            for (int j = 0; j < height; j++) area.Add(new Vector2Int(center.x, j));
+            FxBeam.Spawn(CellToWorld((width - 1) * 0.5f, center.y), width * cellSize, true, Color.white, 0.9f);
+            FxBeam.Spawn(CellToWorld(center.x, (height - 1) * 0.5f), height * cellSize, false, Color.white, 0.9f);
+        }
+        else if ((xLine && yBomb) || (xBomb && yLine))
+        {
+            bool horizontal = (xLine ? x : y).Special == SpecialType.LineH;
+            for (int d = -1; d <= 1; d++)
+            {
+                if (horizontal)
+                {
+                    int row = center.y + d;
+                    if (row < 0 || row >= height) continue;
+                    for (int i = 0; i < width; i++) area.Add(new Vector2Int(i, row));
+                    FxBeam.Spawn(CellToWorld((width - 1) * 0.5f, row), width * cellSize, true, Color.white, 0.9f);
+                }
+                else
+                {
+                    int col = center.x + d;
+                    if (col < 0 || col >= width) continue;
+                    for (int j = 0; j < height; j++) area.Add(new Vector2Int(col, j));
+                    FxBeam.Spawn(CellToWorld(col, (height - 1) * 0.5f), height * cellSize, false, Color.white, 0.9f);
+                }
+            }
+        }
+        else if (xBomb && yBomb)
+        {
+            for (int dx = -2; dx <= 2; dx++)
+            for (int dy = -2; dy <= 2; dy++)
+            {
+                var n = new Vector2Int(center.x + dx, center.y + dy);
+                if (InBounds(n)) area.Add(n);
+            }
+            FxRing.Spawn(pos + Vector3.back, Color.white, 5.5f, 0.4f);
+            ScreenFlash.Flash(Color.white, 0.35f, 0.3f);
+        }
+        else
+        {
+            return new HashSet<Vector2Int> { other, center }; // 각자 터진다
+        }
+
+        // 조합 효과로 대신 터지므로 두 블록 자신의 효과는 지운다 (영역 안의 다른 특수 블록은 그대로 연쇄)
+        x.SetSpecial(SpecialType.None);
+        y.SetSpecial(SpecialType.None);
+        area.Add(other);
+        area.Add(center);
+        Sfx.Play(SfxType.Impact, 0.9f, 1f);
+        Sfx.Play(SfxType.Whoosh, 1.2f, 0.9f);
+        shake?.Shake(0.5f, 0.3f);
+        shake?.Punch(0.06f);
+        return area;
+    }
+
+    /// <summary>특수 블록이 생길 칸: 첫 단계에선 플레이어가 옮긴 칸, 연쇄 중엔 줄의 가운데.</summary>
+    static Vector2Int PickPivot(List<Vector2Int> cells, bool firstStep, Vector2Int swapA, Vector2Int swapB)
+    {
+        if (firstStep)
+        {
+            if (cells.Contains(swapB)) return swapB;
+            if (cells.Contains(swapA)) return swapA;
+        }
+        return cells[cells.Count / 2];
+    }
+
+    HashSet<Vector2Int> ExpandSpecials(HashSet<Vector2Int> start)
+    {
+        var result = new HashSet<Vector2Int>(start);
+        var queue = new Queue<Vector2Int>(start);
+        while (queue.Count > 0)
+        {
+            var c = queue.Dequeue();
+            var b = grid[c.x, c.y];
+            if (b == null || b.Special == SpecialType.None) continue;
+
+            PlaySpecialFx(b, c);
+            foreach (var e in SpecialArea(b, c))
+                if (result.Add(e)) queue.Enqueue(e);
+        }
+        return result;
+    }
+
+    IEnumerable<Vector2Int> SpecialArea(Block b, Vector2Int c)
+    {
+        switch (b.Special)
+        {
+            case SpecialType.LineH:
+                for (int x = 0; x < width; x++) yield return new Vector2Int(x, c.y);
+                break;
+            case SpecialType.LineV:
+                for (int y = 0; y < height; y++) yield return new Vector2Int(c.x, y);
+                break;
+            case SpecialType.Bomb:
+                for (int x = 0; x < width; x++)
+                for (int y = 0; y < height; y++)
+                    if (grid[x, y] != null && grid[x, y].Type == b.Type) yield return new Vector2Int(x, y);
+                break;
+            case SpecialType.Cross:
+                for (int dx = -1; dx <= 1; dx++)
+                for (int dy = -1; dy <= 1; dy++)
+                {
+                    var n = new Vector2Int(c.x + dx, c.y + dy);
+                    if (InBounds(n)) yield return n;
+                }
+                break;
+        }
+    }
+
+    void PlaySpecialFx(Block b, Vector2Int c)
+    {
+        var shake = combo.cameraShake;
+        if (b.Special == SpecialType.Bomb)
+        {
+            FxRing.Spawn(b.transform.position + Vector3.back, b.Color, 5f, 0.4f);
+            ScreenFlash.Flash(b.Color, 0.3f, 0.3f);
+            Sfx.Play(SfxType.Impact, 1.1f, 0.9f);
+            shake?.Shake(0.4f, 0.25f);
+            shake?.Punch(0.05f);
+        }
+        else if (b.Special == SpecialType.Cross)
+        {
+            FxRing.Spawn(b.transform.position + Vector3.back, Color.white, 3.2f, 0.3f);
+            FxBeam.Spawn(b.transform.position, 3f * cellSize, true, Color.white, 0.5f);
+            FxBeam.Spawn(b.transform.position, 3f * cellSize, false, Color.white, 0.5f);
+            Sfx.Play(SfxType.Impact, 1.3f, 0.8f);
+            shake?.Shake(0.35f, 0.2f);
+        }
+        else
+        {
+            bool horizontal = b.Special == SpecialType.LineH;
+            var center = horizontal ? CellToWorld((width - 1) * 0.5f, c.y) : CellToWorld(c.x, (height - 1) * 0.5f);
+            FxBeam.Spawn(center, (horizontal ? width : height) * cellSize, horizontal, Color.white);
+            Sfx.Play(SfxType.Whoosh, 1.4f, 0.8f);
+            Sfx.Play(SfxType.Impact, 1.6f, 0.5f);
+            shake?.Shake(0.3f, 0.18f);
+        }
+    }
+
+    // ───────────────────────── 액티브 스킬 (SkillBar가 부른다) ─────────────────────────
+    // 액티브 스킬은 턴을 쓰지 않는다 (적이 행동하지 않는다).
+
+    public bool CanUseSkills => !busy && run.CanPlay;
+
+    public bool TryUseActive(SkillId id)
+    {
+        if (!CanUseSkills || !skills.Has(id) || skills.Mana < skills.Cost(id) || !skills.Ready(id)) return false;
+        switch (id)
+        {
+            case SkillId.ActiveHammer:
+            case SkillId.ActiveConvert:
+                Deselect();
+                Targeting = id;
+                return true;
+            case SkillId.ActiveShuffle:
+                skills.SpendMana(skills.Cost(id));
+                skills.StartCooldown(id);
+                StartCoroutine(UseShuffle());
+                return true;
+            case SkillId.ActiveDelay:
+                if (intent == null) return false;
+                skills.SpendMana(skills.Cost(id));
+                skills.StartCooldown(id);
+                intent.Delay(1);
+                FxRing.Spawn(enemy.HitPoint + Vector3.back * 1.2f, new Color(0.5f, 0.8f, 1f), 3f, 0.4f);
+                Sfx.Play(SfxType.Chime, 0.8f, 0.8f);
+                return true;
+        }
+        return false;
+    }
+
+    public void CancelTargeting()
+    {
+        Targeting = null;
+        Deselect();
+    }
+
+    IEnumerator UseHammer(Vector2Int cell)
+    {
+        var b = grid[cell.x, cell.y];
+        if (b == null || !skills.SpendMana(skills.Cost(SkillId.ActiveHammer))) yield break;
+        skills.StartCooldown(SkillId.ActiveHammer);
+        busy = true;
+
+        combo.BeginChain();
+        FxRing.Spawn(b.transform.position + Vector3.back, Color.white, 2f, 0.3f);
+        Sfx.Play(SfxType.Impact, 1.4f, 0.9f);
+        combo.cameraShake?.Shake(0.3f, 0.15f);
+        BreakBlocks(new List<Vector2Int> { cell }, 2f); // 특수 블록이면 효과가 터진다
+        yield return new WaitForSeconds(afterPopDelay + 0.1f);
+        yield return Collapse();
+
+        var runs = MatchFinder.FindRuns(GetTypes());
+        if (runs.Count > 0) yield return ResolveBoard(runs, cell, cell);
+        else while (combo.PendingHits > 0) yield return null;
+        yield return AfterSkill();
+    }
+
+    /// <summary>원소 변환: 스킬 바에서 원소를 고른 뒤 부른다.</summary>
+    public void ConvertBlock(Vector2Int cell, int type) => StartCoroutine(UseConvert(cell, type));
+
+    IEnumerator UseConvert(Vector2Int cell, int type)
+    {
+        Deselect();
+        var old = grid[cell.x, cell.y];
+        if (old == null || old.Type == type || !skills.SpendMana(skills.Cost(SkillId.ActiveConvert))) yield break;
+        skills.StartCooldown(SkillId.ActiveConvert);
+        busy = true;
+
+        Vector3 pos = old.transform.position;
+        grid[cell.x, cell.y] = null;
+        Destroy(old.gameObject);
+        var b = SpawnBlock(type, cell, pos);
+        b.StartCoroutine(b.Punch(0.2f, 0.5f));
+        FxRing.Spawn(pos + Vector3.back * 0.7f, blockColors[type], 1.5f, 0.3f);
+        Sfx.Play(SfxType.Chime, 1.3f, 0.7f);
+        yield return new WaitForSeconds(0.25f);
+
+        var runs = MatchFinder.FindRuns(GetTypes());
+        if (runs.Count > 0) yield return ResolveBoard(runs, cell, cell);
+        yield return AfterSkill();
+    }
+
+    IEnumerator UseShuffle()
+    {
+        busy = true;
+        Sfx.Play(SfxType.Whoosh, 1f, 0.9f);
+        yield return Reshuffle();
+        yield return AfterSkill();
+    }
+
+    IEnumerator AfterSkill()
+    {
+        if (!player.IsDead && enemy.IsAlive) yield return run.ProcessLevelUps();
+        if (!MatchFinder.HasPossibleMove(GetTypes(), GetLocks())) yield return Reshuffle();
+        busy = false;
+    }
+
+    // ───────────────────────── 적 행동 (EnemyIntent가 부른다) ─────────────────────────
+
+    bool[,] GetLocks()
+    {
+        var locks = new bool[width, height];
+        for (int x = 0; x < width; x++)
+        for (int y = 0; y < height; y++)
+            locks[x, y] = grid[x, y] != null && grid[x, y].Locked;
+        return locks;
+    }
+
+    List<Block> PickStatusTargets(int count)
+    {
+        var list = new List<Block>();
+        foreach (var cell in GetRandomOccupiedCells(width * height))
+        {
+            var b = grid[cell.x, cell.y];
+            if (b.Locked || b.Burning || b.Special != SpecialType.None) continue;
+            list.Add(b);
+            if (list.Count >= count) break;
+        }
+        return list;
+    }
+
+    public IEnumerator ApplySlime(int count, Vector3 from)
+    {
+        foreach (var b in PickStatusTargets(count))
+        {
+            b.SetLocked(true);
+            b.StartCoroutine(b.Punch(0.15f, 0.25f));
+            FxRing.Spawn(b.transform.position + Vector3.back * 0.7f, new Color(0.55f, 0.75f, 0.45f), 1.3f, 0.3f);
+            Sfx.Play(SfxType.Hit, 0.7f, 0.6f);
+            yield return new WaitForSeconds(0.12f);
+        }
+        yield return new WaitForSeconds(0.2f);
+    }
+
+    public IEnumerator ApplyEmber(int count, Vector3 from)
+    {
+        foreach (var b in PickStatusTargets(count))
+        {
+            b.SetBurning(true);
+            b.StartCoroutine(b.Punch(0.15f, 0.25f));
+            FxRing.Spawn(b.transform.position + Vector3.back * 0.7f, new Color(1f, 0.5f, 0.1f), 1.3f, 0.3f);
+            Debris.Burst(b.transform.position, new Color(1f, 0.5f, 0.1f), 6, 4f, 0.1f);
+            Sfx.Play(SfxType.Hit, 1.3f, 0.6f);
+            yield return new WaitForSeconds(0.12f);
+        }
+        yield return new WaitForSeconds(0.2f);
+    }
+
+    /// <summary>남은 불씨를 모두 꺼뜨리고 그 개수를 돌려준다 (개수만큼 플레이어가 데미지를 입는다).</summary>
+    public int BurnOut(int damageEach)
+    {
+        int count = 0;
+        for (int x = 0; x < width; x++)
+        for (int y = 0; y < height; y++)
+        {
+            var b = grid[x, y];
+            if (b == null || !b.Burning) continue;
+            b.SetBurning(false);
+            Debris.Burst(b.transform.position, new Color(1f, 0.45f, 0.1f), 10, 6f, 0.12f);
+            DamagePopup.Spawn(b.transform.position, $"-{damageEach}", new Color(1f, 0.5f, 0.2f), 0.07f);
+            count++;
+        }
+        return count;
+    }
+
+    /// <summary>
+    /// 동료 공격·망치처럼 매치 밖에서 블록을 부술 때. 특수 블록이면 효과가 터지고,
+    /// 부서진 블록 모두 빛구슬 데미지·경험치·마나를 준다.
+    /// </summary>
+    public void BreakBlocks(List<Vector2Int> cells, float strength)
+    {
+        var start = new HashSet<Vector2Int>();
+        foreach (var c in cells)
+            if (InBounds(c) && grid[c.x, c.y] != null) start.Add(c);
+        if (start.Count == 0) return;
+
+        var hits = new List<(Vector3 position, Color color, int element)>();
+        foreach (var cell in ExpandSpecials(start))
+        {
+            var b = grid[cell.x, cell.y];
+            if (b == null) continue;
+            if ((b.Locked || b.Burning) && skills.PurifyHeal > 0) player.Heal(skills.PurifyHeal);
+            hits.Add((b.transform.position, b.Color, b.Type));
+            DestroyBlock(cell, strength);
+        }
+        skills.AddMana(hits.Count);
+        level.AddBlocks(hits.Count);
+        combo.LaunchOrbs(hits, false);
+    }
+
+    void ClearStatuses()
+    {
+        TurnInStage = 0;
+        if (grid == null) return;
+        foreach (var b in grid)
+        {
+            if (b == null) continue;
+            b.SetLocked(false);
+            b.SetBurning(false);
+        }
     }
 
     IEnumerator Collapse()
