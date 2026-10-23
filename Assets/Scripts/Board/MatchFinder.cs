@@ -1,0 +1,82 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+/// <summary>
+/// 블록 타입 배열(int[x,y], 빈칸은 -1)에서 가로·세로 3매치를 찾는다.
+/// </summary>
+public static class MatchFinder
+{
+    public static HashSet<Vector2Int> FindMatches(int[,] t)
+    {
+        int w = t.GetLength(0), h = t.GetLength(1);
+        var result = new HashSet<Vector2Int>();
+
+        for (int y = 0; y < h; y++)
+        {
+            int x = 0;
+            while (x < w)
+            {
+                int type = t[x, y];
+                int run = 1;
+                while (type >= 0 && x + run < w && t[x + run, y] == type) run++;
+                if (type >= 0 && run >= 3)
+                    for (int i = 0; i < run; i++) result.Add(new Vector2Int(x + i, y));
+                x += run;
+            }
+        }
+
+        for (int x = 0; x < w; x++)
+        {
+            int y = 0;
+            while (y < h)
+            {
+                int type = t[x, y];
+                int run = 1;
+                while (type >= 0 && y + run < h && t[x, y + run] == type) run++;
+                if (type >= 0 && run >= 3)
+                    for (int i = 0; i < run; i++) result.Add(new Vector2Int(x, y + i));
+                y += run;
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>스왑 한 번으로 매치를 만들 수 있는 수가 있는지.</summary>
+    public static bool HasPossibleMove(int[,] t)
+    {
+        int w = t.GetLength(0), h = t.GetLength(1);
+        for (int x = 0; x < w; x++)
+        for (int y = 0; y < h; y++)
+        {
+            if (x + 1 < w && SwapMakesMatch(t, x, y, x + 1, y)) return true;
+            if (y + 1 < h && SwapMakesMatch(t, x, y, x, y + 1)) return true;
+        }
+        return false;
+    }
+
+    static bool SwapMakesMatch(int[,] t, int ax, int ay, int bx, int by)
+    {
+        (t[ax, ay], t[bx, by]) = (t[bx, by], t[ax, ay]);
+        bool match = HasMatchAt(t, ax, ay) || HasMatchAt(t, bx, by);
+        (t[ax, ay], t[bx, by]) = (t[bx, by], t[ax, ay]);
+        return match;
+    }
+
+    static bool HasMatchAt(int[,] t, int x, int y)
+    {
+        int type = t[x, y];
+        if (type < 0) return false;
+        int w = t.GetLength(0), h = t.GetLength(1);
+
+        int horizontal = 1;
+        for (int i = x - 1; i >= 0 && t[i, y] == type; i--) horizontal++;
+        for (int i = x + 1; i < w && t[i, y] == type; i++) horizontal++;
+        if (horizontal >= 3) return true;
+
+        int vertical = 1;
+        for (int i = y - 1; i >= 0 && t[x, i] == type; i--) vertical++;
+        for (int i = y + 1; i < h && t[x, i] == type; i++) vertical++;
+        return vertical >= 3;
+    }
+}

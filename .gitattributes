@@ -1,0 +1,15 @@
+# Windows와 macOS를 오가도 줄바꿈 차이로 변경 표시가 생기지 않게 한다
+* text=auto eol=lf
+
+# 바이너리 (모델, 이미지, 사운드)
+*.fbx binary
+*.glb binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.psd binary
+*.wav binary
+*.mp3 binary
+*.ogg binary
+*.ttf binary
+*.otf binary
